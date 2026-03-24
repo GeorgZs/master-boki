@@ -3,6 +3,7 @@
 #include "engine/flags.h"
 #include "engine/engine.h"
 #include "engine/worker_manager.h"
+#include "utils/event_logger.h"
 
 #define log_header_ "Tracer: "
 
@@ -163,6 +164,15 @@ Tracer::FuncCallInfo* Tracer::OnFuncCallCompleted(const FuncCall& func_call,
         info->dispatch_delay = dispatch_delay;
         total_queuing_delay = info->total_queuing_delay;
     }
+    utils::EmitRuntimeEvent("invoke_end", true, {
+        {"function_id", std::to_string(func_call.func_id)},
+        {"latency_ms", static_cast<double>(current_timestamp - info->recv_timestamp) / 1000.0},
+        {"attributes", {
+            {"dispatch_delay_us", dispatch_delay},
+            {"processing_time_us", processing_time},
+            {"output_size_bytes", output_size}
+        }}
+    });
     if (parent_info != nullptr) {
         absl::MutexLock lk(&parent_info->mu);
         parent_info->total_queuing_delay += total_queuing_delay;
@@ -220,6 +230,14 @@ Tracer::FuncCallInfo* Tracer::OnFuncCallFailed(const FuncCall& func_call, int32_
         info->dispatch_delay = dispatch_delay;
         total_queuing_delay = info->total_queuing_delay;
     }
+    utils::EmitRuntimeEvent("invoke_end", false, {
+        {"function_id", std::to_string(func_call.func_id)},
+        {"latency_ms", static_cast<double>(current_timestamp - info->recv_timestamp) / 1000.0},
+        {"error_code", "func_call_failed"},
+        {"attributes", {
+            {"dispatch_delay_us", dispatch_delay}
+        }}
+    });
     if (parent_info != nullptr) {
         absl::MutexLock lk(&parent_info->mu);
         parent_info->total_queuing_delay += total_queuing_delay;

@@ -4,6 +4,7 @@
 #include "utils/random.h"
 #include "utils/bits.h"
 #include "utils/hash.h"
+#include "utils/event_logger.h"
 
 #define log_header_ "Controller: "
 
@@ -72,6 +73,15 @@ void Controller::InstallNewView(const ViewProto& view_proto) {
         }
     );
     state_ = kNormal;
+    utils::EmitRuntimeEvent("placement_change", true, {
+        {"attributes", {
+            {"reason", "install_new_view"},
+            {"view_id", view_proto.view_id()},
+            {"num_engines", view_proto.engine_nodes_size()},
+            {"num_sequencers", view_proto.sequencer_nodes_size()},
+            {"num_storages", view_proto.storage_nodes_size()}
+        }}
+    });
 }
 
 void Controller::ReconfigView(const Configuration& configuration) {
@@ -206,35 +216,57 @@ std::optional<FinalizedViewProto> Controller::CheckAllSealed(const OngoingSeal& 
 }
 
 void Controller::OnNodeOnline(NodeWatcher::NodeType node_type, uint16_t node_id) {
+    const char* node_type_str = "unknown";
     switch (node_type) {
     case NodeWatcher::kSequencerNode:
+        node_type_str = "sequencer";
         sequencer_nodes_.insert(node_id);
         break;
     case NodeWatcher::kEngineNode:
+        node_type_str = "engine";
         engine_nodes_.insert(node_id);
         break;
     case NodeWatcher::kStorageNode:
+        node_type_str = "storage";
         storage_nodes_.insert(node_id);
         break;
     default:
         break;
     }
+    utils::EmitRuntimeEvent("worker_ready", true, {
+        {"component_id", std::to_string(node_id)},
+        {"attributes", {
+            {"reason", "node_online"},
+            {"node_type", node_type_str}
+        }}
+    });
 }
 
 void Controller::OnNodeOffline(NodeWatcher::NodeType node_type, uint16_t node_id) {
+    const char* node_type_str = "unknown";
     switch (node_type) {
     case NodeWatcher::kSequencerNode:
+        node_type_str = "sequencer";
         sequencer_nodes_.erase(node_id);
         break;
     case NodeWatcher::kEngineNode:
+        node_type_str = "engine";
         engine_nodes_.erase(node_id);
         break;
     case NodeWatcher::kStorageNode:
+        node_type_str = "storage";
         storage_nodes_.erase(node_id);
         break;
     default:
         break;
     }
+    utils::EmitRuntimeEvent("scale_down_start", true, {
+        {"component_id", std::to_string(node_id)},
+        {"attributes", {
+            {"reason", "node_offline"},
+            {"node_type", node_type_str}
+        }}
+    });
 }
 
 void Controller::OnCmdZNodeCreated(std::string_view path,

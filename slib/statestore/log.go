@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 
+	rtcommon "cs.utexas.edu/zjia/faas/common"
 	"cs.utexas.edu/zjia/faas/slib/common"
 
 	"cs.utexas.edu/zjia/faas/protocol"
@@ -394,6 +395,16 @@ func (obj *ObjectRef) appendNormalOpLog(ops []*WriteOp) (uint64 /* seqNum */, er
 	if err != nil {
 		return 0, newRuntimeError(err.Error())
 	} else {
+		for _, op := range ops {
+			rtcommon.EmitBokiEvent("state_write", true, map[string]interface{}{
+				"state_unit_id": op.ObjName,
+				"key_id":        op.ObjName + ":" + op.Path,
+				"attributes": map[string]interface{}{
+					"operation": op.OpType,
+					"seq_num":   seqNum,
+				},
+			})
+		}
 		return seqNum, nil
 	}
 }

@@ -1,6 +1,7 @@
 package statestore
 
 import (
+	rtcommon "cs.utexas.edu/zjia/faas/common"
 	"cs.utexas.edu/zjia/faas/slib/common"
 
 	"cs.utexas.edu/zjia/faas/protocol"
@@ -82,7 +83,22 @@ func (obj *ObjectRef) Get(path string) (Value, error) {
 	}
 	resolved := obj.view.contents.Path(path)
 	if resolved == nil {
+		rtcommon.EmitBokiEvent("state_read", false, map[string]interface{}{
+			"state_unit_id": obj.name,
+			"key_id":        obj.name + ":" + path,
+			"error_code":    "path_not_exist",
+			"attributes": map[string]interface{}{
+				"operation": "get",
+			},
+		})
 		return NullValue(), newPathNotExistError(path)
 	}
+	rtcommon.EmitBokiEvent("state_read", true, map[string]interface{}{
+		"state_unit_id": obj.name,
+		"key_id":        obj.name + ":" + path,
+		"attributes": map[string]interface{}{
+			"operation": "get",
+		},
+	})
 	return valueFromInterface(resolved.Data()), nil
 }

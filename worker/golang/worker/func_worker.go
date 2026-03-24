@@ -8,11 +8,11 @@ import (
 	"log"
 	"net"
 	"os"
-	"time"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	common "cs.utexas.edu/zjia/faas/common"
 	config "cs.utexas.edu/zjia/faas/config"
@@ -150,6 +150,7 @@ func (w *FuncWorker) doHandshake() error {
 	if w.configEntry == nil {
 		return fmt.Errorf("Invalid funcId: %d", w.funcId)
 	}
+	common.SetWorkerIdentity(w.funcId, w.clientId)
 	w.isGrpcSrv = strings.HasPrefix(w.configEntry.FuncName, "grpc:")
 
 	if w.isGrpcSrv {
@@ -235,6 +236,14 @@ func (w *FuncWorker) executeFunc(dispatchFuncMessage []byte) {
 	if err != nil {
 		log.Printf("[ERROR] FuncCall failed with error: %v", err)
 	}
+	common.EmitBokiEvent("invoke_end", err == nil, map[string]interface{}{
+		"function_id": strconv.FormatUint(uint64(funcCall.FuncId), 10),
+		"latency_ms":  float64(processingTime) / 1000.0,
+		"error_code":  fmt.Sprintf("%v", err),
+		"attributes": map[string]interface{}{
+			"dispatch_delay_us": dispatchDelay,
+		},
+	})
 
 	var response []byte
 	if w.useFifoForNestedCall {
@@ -578,9 +587,30 @@ func (w *FuncWorker) SharedLogAppend(ctx context.Context, tags []uint64, data []
 		response := <-outputChan
 		result := protocol.GetSharedLogResultTypeFromMessage(response)
 		if result == protocol.SharedLogResultType_APPEND_OK {
-			return protocol.GetLogSeqNumFromMessage(response), nil
+			seq := protocol.GetLogSeqNumFromMessage(response)
+			stateUnitID := ""
+			if len(tags) > 0 {
+				stateUnitID = fmt.Sprintf("%d", tags[0])
+			}
+			common.EmitBokiEvent("state_write", true, map[string]interface{}{
+				"state_unit_id": stateUnitID,
+				"attributes": map[string]interface{}{
+					"operation": "shared_log_append",
+					"seq_num":   seq,
+					"tag_count": len(tags),
+					"bytes":     len(data),
+				},
+			})
+			return seq, nil
 		} else if result == protocol.SharedLogResultType_DISCARDED {
 			log.Printf("[ERROR] Append discarded, will retry")
+			common.EmitBokiEvent("txn_retry", false, map[string]interface{}{
+				"error_code": "append_discarded",
+				"attributes": map[string]interface{}{
+					"remaining_retries": remainingRetries,
+					"operation":         "shared_log_append",
+				},
+			})
 			if remainingRetries > 0 {
 				time.Sleep(sleepDuration)
 				sleepDuration *= 2
@@ -659,7 +689,17 @@ func (w *FuncWorker) SharedLogReadNext(ctx context.Context, tag uint64, seqNum u
 	id := atomic.AddUint64(&w.nextLogOpId, 1)
 	currentCallId := atomic.LoadUint64(&w.currentCall)
 	message := protocol.NewSharedLogReadMessage(currentCallId, w.clientId, tag, seqNum, 1 /* direction */, false /* block */, id)
-	return w.sharedLogReadCommon(ctx, message, id)
+	entry, err := w.sharedLogReadCommon(ctx, message, id)
+	common.EmitBokiEvent("state_read", err == nil, map[string]interface{}{
+		"state_unit_id": fmt.Sprintf("%d", tag),
+		"attributes": map[string]interface{}{
+			"operation": "shared_log_read_next",
+			"seq_num":   seqNum,
+			"hit":       entry != nil,
+		},
+		"error_code": fmt.Sprintf("%v", err),
+	})
+	return entry, err
 }
 
 // Implement types.Environment
@@ -667,7 +707,17 @@ func (w *FuncWorker) SharedLogReadNextBlock(ctx context.Context, tag uint64, seq
 	id := atomic.AddUint64(&w.nextLogOpId, 1)
 	currentCallId := atomic.LoadUint64(&w.currentCall)
 	message := protocol.NewSharedLogReadMessage(currentCallId, w.clientId, tag, seqNum, 1 /* direction */, true /* block */, id)
-	return w.sharedLogReadCommon(ctx, message, id)
+	entry, err := w.sharedLogReadCommon(ctx, message, id)
+	common.EmitBokiEvent("state_read", err == nil, map[string]interface{}{
+		"state_unit_id": fmt.Sprintf("%d", tag),
+		"attributes": map[string]interface{}{
+			"operation": "shared_log_read_next_block",
+			"seq_num":   seqNum,
+			"hit":       entry != nil,
+		},
+		"error_code": fmt.Sprintf("%v", err),
+	})
+	return entry, err
 }
 
 // Implement types.Environment
@@ -675,7 +725,17 @@ func (w *FuncWorker) SharedLogReadPrev(ctx context.Context, tag uint64, seqNum u
 	id := atomic.AddUint64(&w.nextLogOpId, 1)
 	currentCallId := atomic.LoadUint64(&w.currentCall)
 	message := protocol.NewSharedLogReadMessage(currentCallId, w.clientId, tag, seqNum, -1 /* direction */, false /* block */, id)
-	return w.sharedLogReadCommon(ctx, message, id)
+	entry, err := w.sharedLogReadCommon(ctx, message, id)
+	common.EmitBokiEvent("state_read", err == nil, map[string]interface{}{
+		"state_unit_id": fmt.Sprintf("%d", tag),
+		"attributes": map[string]interface{}{
+			"operation": "shared_log_read_prev",
+			"seq_num":   seqNum,
+			"hit":       entry != nil,
+		},
+		"error_code": fmt.Sprintf("%v", err),
+	})
+	return entry, err
 }
 
 // Implement types.Environment

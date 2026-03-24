@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	rtcommon "cs.utexas.edu/zjia/faas/common"
 	"cs.utexas.edu/zjia/faas/slib/common"
 
 	"cs.utexas.edu/zjia/faas/types"
@@ -102,6 +103,13 @@ func (env *envImpl) TxnCommit() (bool /* committed */, error) {
 	}
 	seqNum, err := env.faasEnv.SharedLogAppend(env.faasCtx, tags, common.CompressData(encoded))
 	if err != nil {
+		rtcommon.EmitBokiEvent("txn_retry", false, map[string]interface{}{
+			"error_code": err.Error(),
+			"attributes": map[string]interface{}{
+				"txn_id":   ctx.id,
+				"op_count": len(ctx.ops),
+			},
+		})
 		return false, newRuntimeError(err.Error())
 	}
 	// log.Printf("[DEBUG] Append TxnCommit log: seqNum=%#016x, op_size=%d", seqNum, len(ctx.ops))
@@ -111,6 +119,15 @@ func (env *envImpl) TxnCommit() (bool /* committed */, error) {
 	if committed, err := objectLog.checkTxnCommitResult(env); err != nil {
 		return false, err
 	} else {
+		if !committed {
+			rtcommon.EmitBokiEvent("txn_conflict", true, map[string]interface{}{
+				"attributes": map[string]interface{}{
+					"txn_id":   ctx.id,
+					"seq_num":  seqNum,
+					"op_count": len(ctx.ops),
+				},
+			})
+		}
 		return committed, nil
 	}
 }

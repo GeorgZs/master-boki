@@ -2,6 +2,7 @@
 
 #include "gateway/flags.h"
 #include "gateway/server.h"
+#include "utils/event_logger.h"
 
 #define log_header_ "NodeManager: "
 
@@ -73,6 +74,13 @@ void NodeManager::OnNodeOnline(NodeWatcher::NodeType node_type, uint16_t node_id
         max_running_requests_ = absl::GetFlag(FLAGS_max_running_requests)
                               * connected_nodes_.size();
         HLOG_F(INFO, "{} nodes connected", connected_nodes_.size());
+        utils::EmitRuntimeEvent("scale_up_end", true, {
+            {"component_id", std::to_string(node_id)},
+            {"attributes", {
+                {"reason", "engine_node_online"},
+                {"current_connected_nodes", connected_nodes_.size()}
+            }}
+        });
     }
     server_->OnEngineNodeOnline(node_id);
 }
@@ -92,6 +100,13 @@ void NodeManager::OnNodeOffline(NodeWatcher::NodeType node_type, uint16_t node_i
         max_running_requests_ = absl::GetFlag(FLAGS_max_running_requests)
                               * connected_nodes_.size();
         HLOG_F(INFO, "{} nodes connected", connected_nodes_.size());
+        utils::EmitRuntimeEvent("scale_down_start", true, {
+            {"component_id", std::to_string(node_id)},
+            {"attributes", {
+                {"reason", "engine_node_offline"},
+                {"current_connected_nodes", connected_nodes_.size()}
+            }}
+        });
     }
     server_->OnEngineNodeOffline(node_id);
 }
