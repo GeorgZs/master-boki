@@ -1,0 +1,11 @@
+[
+  {
+    "funcName": "statefulBench",
+    "funcId": 1,
+    "minWorkers": 1,
+    "maxWorkers": 4,
+    "defaultLogSpace": 0,
+    "allowHttpGet": false,
+    "qsAsInput": false
+  }
+]

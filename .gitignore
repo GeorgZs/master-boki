@@ -38,3 +38,9 @@
 /tmp/
 /config.mk
 *~
+
+# Benchmarks
+bench_client_static
+echo_static
+stateful_bench
+stateful_bench_static
